@@ -34,7 +34,7 @@ def load_and_prepare_data():
         st.error(f"CSV file not found: {CSV_PATH}\nPlease place the file in the same folder.")
         st.stop()
 
-    df = pd.read_csv(CSV_PATH)
+    df = pd.read_csv(unspoken_meaning_dataset_200rows.csv)
 
     # Clean text
     df['message'] = df['message'].apply(lambda x: re.sub(r'[^\w\s]', '', str(x).lower().strip()))
@@ -206,4 +206,5 @@ def main():
 
 
 if __name__ == "__main__":
+
     main()
