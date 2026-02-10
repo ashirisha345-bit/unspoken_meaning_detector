@@ -68,12 +68,13 @@ def train_or_load_model(force_retrain=False):
 
     train_df, test_df, meaning_dict = load_and_prepare_data()
 
+    # ★★ SAFE VERSION FOR STREAMLIT CLOUD ★★
     model = Pipeline([
         ("tfidf", TfidfVectorizer(max_features=5000)),
         ("clf", LogisticRegression(
             max_iter=1000,
-            solver="liblinear",
-            multi_class="auto"
+            solver="liblinear"   # <-- keep this
+            # NO multi_class here (causes TypeError on Cloud)
         ))
     ])
 
