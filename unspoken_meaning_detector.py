@@ -1,5 +1,6 @@
 # unspoken_meaning_detector.py
 
+
 import streamlit as st
 import pandas as pd
 import re
@@ -34,7 +35,7 @@ NUM_EPOCHS = 3
 BATCH_SIZE = 8
 
 # ────────────────────────────────────────────────
-#  (rest of your original code remains the same)
+#  HELPER FUNCTIONS
 # ────────────────────────────────────────────────
 
 @st.cache_data
@@ -100,7 +101,7 @@ def train_or_load_model(_num_labels, force_retrain=False):
     test_dataset  = Dataset.from_pandas(test_df[['message', 'label_id']])
 
     tokenized_train = train_dataset.map(lambda x: tokenize_function(x, tokenizer), batched=True)
-    tokenized_test  = test_dataset.map( lambda x: tokenize_function(x, tokenizer), batched=True)
+    tokenized_test  = test_dataset.map(lambda x: tokenize_function(x, tokenizer), batched=True)
 
     model = DistilBertForSequenceClassification.from_pretrained(
         'distilbert-base-uncased', num_labels=num_labels
@@ -114,7 +115,7 @@ def train_or_load_model(_num_labels, force_retrain=False):
         warmup_steps=200,
         weight_decay=0.01,
         logging_dir='./logs',
-        evaluation_strategy="epoch",
+        eval_strategy="epoch",              # ← CHANGED HERE: was evaluation_strategy
         save_strategy="no",
         load_best_model_at_end=False,
         report_to="none",
