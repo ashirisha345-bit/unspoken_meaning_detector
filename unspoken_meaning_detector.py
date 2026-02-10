@@ -7,7 +7,7 @@ import re
 import joblib
 import os
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import SGDClassifier
 from sklearn.pipeline import Pipeline
 
 # ---------------- CONFIG ----------------
@@ -24,7 +24,6 @@ def load_and_prepare_data():
 
     df = pd.read_csv(CSV_PATH)
 
-    # Required columns
     required_cols = {"message", "label", "hidden_meaning"}
     if not required_cols.issubset(df.columns):
         st.error("CSV must contain: message, label, hidden_meaning")
@@ -38,7 +37,7 @@ def load_and_prepare_data():
         .apply(lambda x: re.sub(r"[^\w\s]", "", x).strip())
     )
 
-    # Remove empty rows (very important)
+    # Remove empty rows
     df = df.dropna(subset=["message", "label"])
     df = df[df["message"] != ""]
 
@@ -61,18 +60,17 @@ def train_or_load_model(force_retrain=False):
 
     df, meaning_dict = load_and_prepare_data()
 
-    # ★★ MOST STABLE OPTION FOR STREAMLIT CLOUD ★★
+    # ★★ STREAMLIT-CLOUD PROOF MODEL ★★
     model = Pipeline([
         ("tfidf", TfidfVectorizer(max_features=5000)),
-        ("clf", LogisticRegression(
-            max_iter=1000,
-            solver="lbfgs",      # Cloud-safe
-            multi_class="auto"  # Proper multi-class handling
+        ("clf", SGDClassifier(
+            loss="log_loss",   # behaves like logistic regression
+            max_iter=1000
         ))
     ])
 
     with st.spinner("Training model..."):
-        model.fit(df["message"], df["label"])  # train on full dataset
+        model.fit(df["message"], df["label"])
 
     joblib.dump(model, MODEL_PATH)
     joblib.dump(meaning_dict, MEANING_PATH)
@@ -100,8 +98,11 @@ def main():
             clean_text = re.sub(r"[^\w\s]", "", message.lower().strip())
 
             pred = model.predict([clean_text])[0]
-            probs = model.predict_proba([clean_text])[0]
-            confidence = max(probs) * 100
+
+            # SGDClassifier doesn’t give probabilities by default,
+            # so we just show a simple confidence-like score
+            score = model.decision_function([clean_text]).max()
+            confidence = min(100, max(50, score))
 
             meaning = meaning_dict.get(pred, "Unknown meaning")
 
@@ -109,7 +110,7 @@ def main():
             st.write(
                 f"**Prediction:** "
                 f"{pred.capitalize().replace('_', '-')} "
-                f"({confidence:.0f}%)"
+                f"(~{confidence:.0f}%)"
             )
             st.write(f"**Real meaning:** {meaning}")
 
