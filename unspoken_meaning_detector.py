@@ -11,100 +11,88 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 
-# ────────────────────────────────────────────────
-# CONFIG
-# ────────────────────────────────────────────────
+# ---------------- CONFIG ----------------
 CSV_PATH = "unspoken_meaning_dataset_200rows.csv"
 MODEL_PATH = "model.joblib"
 MEANING_PATH = "meaning_dict.joblib"
 
-# ────────────────────────────────────────────────
-# HELPER FUNCTIONS
-# ────────────────────────────────────────────────
-
+# -------------- DATA LOADING ------------
 @st.cache_data
 def load_and_prepare_data():
     if not os.path.exists(CSV_PATH):
-        st.error(f"CSV file not found: {CSV_PATH}\nMake sure it's in the GitHub repo root.")
+        st.error(f"CSV file not found: {CSV_PATH}")
         st.stop()
 
     df = pd.read_csv(CSV_PATH)
 
-    # Required columns check (prevents hidden crashes)
+    # Make sure required columns exist
     required_cols = {"message", "label", "hidden_meaning"}
     if not required_cols.issubset(df.columns):
-        st.error(
-            "CSV must contain these columns exactly: "
-            "message, label, hidden_meaning"
-        )
+        st.error("CSV must contain: message, label, hidden_meaning")
         st.stop()
 
     # Clean text
-    df['message'] = df['message'].apply(
-        lambda x: re.sub(r'[^\w\s]', '', str(x).lower().strip())
+    df["message"] = df["message"].astype(str).str.lower()
+    df["message"] = df["message"].apply(
+        lambda x: re.sub(r"[^\w\s]", "", x).strip()
     )
 
+    # Remove empty rows that break training
+    df = df.dropna(subset=["message", "label"])
+    df = df[df["message"] != ""]
+
     # Meaning dictionary
-    meaning_dict = df.groupby('label')['hidden_meaning'].first().to_dict()
+    meaning_dict = df.groupby("label")["hidden_meaning"].first().to_dict()
 
     # Train-test split
     train_df, test_df = train_test_split(
         df,
         test_size=0.2,
         random_state=42,
-        stratify=df['label']
+        stratify=df["label"]
     )
 
     return train_df, test_df, meaning_dict
 
-
+# -------------- MODEL TRAINING ----------
 @st.cache_resource
 def train_or_load_model(force_retrain=False):
 
-    # Load existing model if present
     if not force_retrain and os.path.exists(MODEL_PATH) and os.path.exists(MEANING_PATH):
         model = joblib.load(MODEL_PATH)
         meaning_dict = joblib.load(MEANING_PATH)
-        st.success("Loaded pre-trained model from disk.")
+        st.success("Loaded saved model.")
         return model, meaning_dict
 
-    # Train new model
-    st.info("Training new model... (quick with sklearn)")
+    st.info("Training new model...")
 
     train_df, test_df, meaning_dict = load_and_prepare_data()
 
-    # SAFE PIPELINE FOR STREAMLIT CLOUD
     model = Pipeline([
-        ('tfidf', TfidfVectorizer(max_features=5000)),
-        ('clf', LogisticRegression(
+        ("tfidf", TfidfVectorizer(max_features=5000)),
+        ("clf", LogisticRegression(
             max_iter=1000,
-            solver='liblinear'   # <-- Critical fix for Streamlit Cloud
+            solver="liblinear",
+            multi_class="auto"
         ))
     ])
 
-    with st.spinner("Training..."):
-        model.fit(train_df['message'], train_df['label'])
+    with st.spinner("Training model..."):
+        model.fit(train_df["message"], train_df["label"])
 
-    # Save model + dictionary
     joblib.dump(model, MODEL_PATH)
     joblib.dump(meaning_dict, MEANING_PATH)
 
-    st.success("Training finished → model saved!")
+    st.success("Training complete and model saved.")
     return model, meaning_dict
 
-
-# ────────────────────────────────────────────────
-# STREAMLIT APP
-# ────────────────────────────────────────────────
-
+# ---------------- STREAMLIT APP ----------------
 def main():
     st.title("Unspoken Meaning Detector")
     st.subheader("What people say vs what they really mean.")
 
-    # Load / train model
     model, meaning_dict = train_or_load_model()
 
-    # UI
     message = st.text_area(
         "Enter your message:",
         height=120,
@@ -112,8 +100,10 @@ def main():
     )
 
     if st.button("Analyze"):
-        if message.strip():
-            clean_text = re.sub(r'[^\w\s]', '', message.lower().strip())
+        if not message.strip():
+            st.warning("Please enter a message.")
+        else:
+            clean_text = re.sub(r"[^\w\s]", "", message.lower().strip())
 
             pred = model.predict([clean_text])[0]
             probs = model.predict_proba([clean_text])[0]
@@ -128,8 +118,6 @@ def main():
                 f"({confidence:.0f}%)"
             )
             st.write(f"**Real meaning:** {meaning}")
-        else:
-            st.warning("Please enter a message first.")
 
     st.markdown("---")
     st.write("Built with sklearn + Streamlit.")
@@ -137,7 +125,6 @@ def main():
     if st.button("Force retrain model"):
         train_or_load_model(force_retrain=True)
         st.rerun()
-
 
 if __name__ == "__main__":
     main()
