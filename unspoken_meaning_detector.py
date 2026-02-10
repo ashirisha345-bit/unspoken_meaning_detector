@@ -6,7 +6,6 @@ import pandas as pd
 import re
 import joblib
 import os
-from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
@@ -25,34 +24,28 @@ def load_and_prepare_data():
 
     df = pd.read_csv(CSV_PATH)
 
-    # Make sure required columns exist
+    # Required columns
     required_cols = {"message", "label", "hidden_meaning"}
     if not required_cols.issubset(df.columns):
         st.error("CSV must contain: message, label, hidden_meaning")
         st.stop()
 
     # Clean text
-    df["message"] = df["message"].astype(str).str.lower()
-    df["message"] = df["message"].apply(
-        lambda x: re.sub(r"[^\w\s]", "", x).strip()
+    df["message"] = (
+        df["message"]
+        .astype(str)
+        .str.lower()
+        .apply(lambda x: re.sub(r"[^\w\s]", "", x).strip())
     )
 
-    # Remove empty rows that break training
+    # Remove empty rows (very important)
     df = df.dropna(subset=["message", "label"])
     df = df[df["message"] != ""]
 
     # Meaning dictionary
     meaning_dict = df.groupby("label")["hidden_meaning"].first().to_dict()
 
-    # Train-test split
-    train_df, test_df = train_test_split(
-        df,
-        test_size=0.2,
-        random_state=42,
-        stratify=df["label"]
-    )
-
-    return train_df, test_df, meaning_dict
+    return df, meaning_dict
 
 # -------------- MODEL TRAINING ----------
 @st.cache_resource
@@ -66,20 +59,20 @@ def train_or_load_model(force_retrain=False):
 
     st.info("Training new model...")
 
-    train_df, test_df, meaning_dict = load_and_prepare_data()
+    df, meaning_dict = load_and_prepare_data()
 
-    # ★★ SAFE VERSION FOR STREAMLIT CLOUD ★★
+    # ★★ MOST STABLE OPTION FOR STREAMLIT CLOUD ★★
     model = Pipeline([
         ("tfidf", TfidfVectorizer(max_features=5000)),
         ("clf", LogisticRegression(
             max_iter=1000,
-            solver="liblinear"   # <-- keep this
-            # NO multi_class here (causes TypeError on Cloud)
+            solver="lbfgs",      # Cloud-safe
+            multi_class="auto"  # Proper multi-class handling
         ))
     ])
 
     with st.spinner("Training model..."):
-        model.fit(train_df["message"], train_df["label"])
+        model.fit(df["message"], df["label"])  # train on full dataset
 
     joblib.dump(model, MODEL_PATH)
     joblib.dump(meaning_dict, MEANING_PATH)
