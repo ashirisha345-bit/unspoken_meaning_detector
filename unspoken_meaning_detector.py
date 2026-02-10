@@ -1,6 +1,4 @@
 # unspoken_meaning_detector.py
-# New approach: Simple sklearn TF-IDF + LogisticRegression (lighter, no transformers/torch)
-# Trains in seconds, deploys easily on Streamlit Cloud
 # Run with: streamlit run unspoken_meaning_detector.py
 
 import streamlit as st
@@ -23,6 +21,7 @@ MEANING_PATH = "meaning_dict.joblib"
 # ────────────────────────────────────────────────
 # HELPER FUNCTIONS
 # ────────────────────────────────────────────────
+
 @st.cache_data
 def load_and_prepare_data():
     if not os.path.exists(CSV_PATH):
@@ -31,15 +30,29 @@ def load_and_prepare_data():
 
     df = pd.read_csv(CSV_PATH)
 
+    # Required columns check (prevents hidden crashes)
+    required_cols = {"message", "label", "hidden_meaning"}
+    if not required_cols.issubset(df.columns):
+        st.error(
+            "CSV must contain these columns exactly: "
+            "message, label, hidden_meaning"
+        )
+        st.stop()
+
     # Clean text
-    df['message'] = df['message'].apply(lambda x: re.sub(r'[^\w\s]', '', str(x).lower().strip()))
+    df['message'] = df['message'].apply(
+        lambda x: re.sub(r'[^\w\s]', '', str(x).lower().strip())
+    )
 
     # Meaning dictionary
     meaning_dict = df.groupby('label')['hidden_meaning'].first().to_dict()
 
-    # Split
+    # Train-test split
     train_df, test_df = train_test_split(
-        df, test_size=0.2, random_state=42, stratify=df['label']
+        df,
+        test_size=0.2,
+        random_state=42,
+        stratify=df['label']
     )
 
     return train_df, test_df, meaning_dict
@@ -47,29 +60,32 @@ def load_and_prepare_data():
 
 @st.cache_resource
 def train_or_load_model(force_retrain=False):
+
+    # Load existing model if present
     if not force_retrain and os.path.exists(MODEL_PATH) and os.path.exists(MEANING_PATH):
-        # Load existing model
         model = joblib.load(MODEL_PATH)
         meaning_dict = joblib.load(MEANING_PATH)
         st.success("Loaded pre-trained model from disk.")
         return model, meaning_dict
 
-    # ── Train new model ───────────────────────────────────────
+    # Train new model
     st.info("Training new model... (quick with sklearn)")
 
     train_df, test_df, meaning_dict = load_and_prepare_data()
 
-    # Pipeline
+    # SAFE PIPELINE FOR STREAMLIT CLOUD
     model = Pipeline([
         ('tfidf', TfidfVectorizer(max_features=5000)),
-        ('clf', LogisticRegression(max_iter=1000, multi_class='ovr'))
+        ('clf', LogisticRegression(
+            max_iter=1000,
+            solver='liblinear'   # <-- Critical fix for Streamlit Cloud
+        ))
     ])
 
-    # Train
     with st.spinner("Training..."):
         model.fit(train_df['message'], train_df['label'])
 
-    # Save
+    # Save model + dictionary
     joblib.dump(model, MODEL_PATH)
     joblib.dump(meaning_dict, MEANING_PATH)
 
@@ -80,6 +96,7 @@ def train_or_load_model(force_retrain=False):
 # ────────────────────────────────────────────────
 # STREAMLIT APP
 # ────────────────────────────────────────────────
+
 def main():
     st.title("Unspoken Meaning Detector")
     st.subheader("What people say vs what they really mean.")
@@ -88,29 +105,35 @@ def main():
     model, meaning_dict = train_or_load_model()
 
     # UI
-    message = st.text_area("Enter your message:", height=120, placeholder="It's fine.")
+    message = st.text_area(
+        "Enter your message:",
+        height=120,
+        placeholder="It's fine."
+    )
 
     if st.button("Analyze"):
-        if message:
-            # Preprocess
+        if message.strip():
             clean_text = re.sub(r'[^\w\s]', '', message.lower().strip())
 
-            # Predict
             pred = model.predict([clean_text])[0]
             probs = model.predict_proba([clean_text])[0]
             confidence = max(probs) * 100
 
-            meaning = meaning_dict.get(pred, "Unknown")
+            meaning = meaning_dict.get(pred, "Unknown meaning")
 
-            # Display
             st.write(f"**Original message:** {message}")
-            st.write(f"**Prediction:** {pred.capitalize().replace('_', '-')} ({confidence:.0f}%)")
+            st.write(
+                f"**Prediction:** "
+                f"{pred.capitalize().replace('_', '-')} "
+                f"({confidence:.0f}%)"
+            )
             st.write(f"**Real meaning:** {meaning}")
+        else:
+            st.warning("Please enter a message first.")
 
     st.markdown("---")
     st.write("Built with sklearn + Streamlit.")
 
-    # Optional retrain
     if st.button("Force retrain model"):
         train_or_load_model(force_retrain=True)
         st.rerun()
